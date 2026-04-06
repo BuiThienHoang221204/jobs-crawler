@@ -3,7 +3,7 @@ const express = require("express");
 const { chromium } = require("playwright");
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.get("/jobs", async (req, res) => {
   const keyword = req.query.keyword || "frontend";
