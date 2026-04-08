@@ -5,8 +5,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon index.js",
-  "start": "node index.js",
-  "postinstall": "bash -c 'if [ \"$SKIP_PLAYWRIGHT_INSTALL\" != \"1\" ]; then npx playwright install --with-deps; else echo \"Skipping Playwright browser install (SKIP_PLAYWRIGHT_INSTALL=1)\"; fi'"
+    "start": "node index.js",
+    "postinstall": "npx playwright install chromium"
   },
   "keywords": [],
   "author": "",
