@@ -9,4 +9,5 @@ COPY . .
 
 EXPOSE 8080
 
-CMD ["node", "server.js"]
+# Start the app. The main file is `index.js` in this repo.
+CMD ["node", "index.js"]
