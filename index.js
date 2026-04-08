@@ -43,15 +43,6 @@ function parseLevels(text) {
 app.get("/jobs", async (req, res) => {
   const keyword = req.query.keyword || "frontend";
 
-  // mock mode
-  if (process.env.DISABLE_SCRAPE === "1") {
-    return res.json({
-      success: true,
-      mock: true,
-      data: [{ title: "Mock Job", company: "ACME" }]
-    });
-  }
-
   // lazy load playwright
   const { chromium } = require("playwright");
 
@@ -128,8 +119,8 @@ app.get("/jobs", async (req, res) => {
     console.error("ERROR:", err.message);
     res.status(500).json({ error: err.message });
   } finally {
-    if (context) await context.close().catch(() => {});
-    if (browser) await browser.close().catch(() => {});
+    if (context) await context.close().catch(() => { });
+    if (browser) await browser.close().catch(() => { });
   }
 });
 
