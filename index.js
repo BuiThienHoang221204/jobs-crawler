@@ -4,10 +4,19 @@ const { chromium } = require("playwright");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Basic logging for incoming requests (helps debug 502s)
+app.use((req, res, next) => {
+  console.log(`> ${req.method} ${req.path}`);
+  next();
+});
+
 // ✅ Health check (QUAN TRỌNG)
 app.get("/", (req, res) => {
   res.send("OK");
 });
+
+// avoid favicon 404 noise
+app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 // parse level
 function parseLevels(text) {
@@ -33,9 +42,19 @@ app.get("/jobs", async (req, res) => {
   let context;
 
   // ⏱️ timeout guard (tránh Railway kill)
-  const timeout = setTimeout(() => {
+  let timedOut = false;
+  const timeout = setTimeout(async () => {
+    timedOut = true;
     console.log("Request timeout");
-    res.status(504).json({ error: "Timeout" });
+    try {
+      if (context) await context.close();
+    } catch (e) {}
+    try {
+      if (browser) await browser.close();
+    } catch (e) {}
+    if (!res.headersSent) {
+      res.status(504).json({ error: "Timeout" });
+    }
   }, 25000);
 
   try {
@@ -88,7 +107,7 @@ app.get("/jobs", async (req, res) => {
       });
     });
 
-    await browser.close();
+  await browser.close();
 
     const filtered = jobs.filter(job => {
       const text = (job.title || "") + " " + (job.tags || []).join(" ");
@@ -102,11 +121,18 @@ app.get("/jobs", async (req, res) => {
 
     clearTimeout(timeout);
 
-    res.json({
-      success: true,
-      count: filtered.length,
-      data: filtered
-    });
+    if (timedOut) {
+      console.log('Request already timed out, not sending response');
+      return;
+    }
+
+    if (!res.headersSent) {
+      res.json({
+        success: true,
+        count: filtered.length,
+        data: filtered
+      });
+    }
 
   } catch (err) {
     console.error("ERROR:", err.message);
