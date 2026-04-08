@@ -1,21 +1,22 @@
 const express = require("express");
-const { chromium } = require("playwright");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Basic logging for incoming requests (helps debug 502s)
+// log startup
+console.log("🚀 Starting app...");
+
+// Basic logging
 app.use((req, res, next) => {
   console.log(`> ${req.method} ${req.path}`);
   next();
 });
 
-// ✅ Health check (QUAN TRỌNG)
+// ✅ Health check
 app.get("/", (req, res) => {
   res.send("OK");
 });
 
-// avoid favicon 404 noise
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 // parse level
@@ -38,32 +39,29 @@ function parseLevels(text) {
 app.get("/jobs", async (req, res) => {
   const keyword = req.query.keyword || "frontend";
 
-  // Quick fail-safe: if DISABLE_SCRAPE is set, return a small mock response so
-  // we can verify the service / port connectivity without running Playwright.
+  // ✅ mock mode để debug
   if (process.env.DISABLE_SCRAPE === "1") {
     return res.json({
       success: true,
       mock: true,
-      data: [
-        { title: "Mock Job - Frontend", company: "ACME", source: "mock" }
-      ]
+      data: [{ title: "Mock Job", company: "ACME" }]
     });
   }
+
+  // 🔥 lazy load Playwright (FIX QUAN TRỌNG)
+  const { chromium } = require("playwright");
 
   let browser;
   let context;
 
-  // ⏱️ timeout guard (tránh Railway kill)
   let timedOut = false;
   const timeout = setTimeout(async () => {
     timedOut = true;
-    console.log("Request timeout");
-    try {
-      if (context) await context.close();
-    } catch (e) {}
-    try {
-      if (browser) await browser.close();
-    } catch (e) {}
+    console.log("⏱ Timeout");
+
+    try { if (context) await context.close(); } catch {}
+    try { if (browser) await browser.close(); } catch {}
+
     if (!res.headersSent) {
       res.status(504).json({ error: "Timeout" });
     }
@@ -119,8 +117,6 @@ app.get("/jobs", async (req, res) => {
       });
     });
 
-  await browser.close();
-
     const filtered = jobs.filter(job => {
       const text = (job.title || "") + " " + (job.tags || []).join(" ");
       const levels = parseLevels(text);
@@ -133,12 +129,7 @@ app.get("/jobs", async (req, res) => {
 
     clearTimeout(timeout);
 
-    if (timedOut) {
-      console.log('Request already timed out, not sending response');
-      return;
-    }
-
-    if (!res.headersSent) {
+    if (!timedOut && !res.headersSent) {
       res.json({
         success: true,
         count: filtered.length,
@@ -148,19 +139,18 @@ app.get("/jobs", async (req, res) => {
 
   } catch (err) {
     console.error("ERROR:", err.message);
-
     clearTimeout(timeout);
 
-    res.status(500).json({
-      error: err.message
-    });
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message });
+    }
   } finally {
     if (context) await context.close().catch(() => {});
     if (browser) await browser.close().catch(() => {});
   }
 });
 
-// ✅ bind đúng host cho container
+// ✅ QUAN TRỌNG: bind đúng host
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
