@@ -3,7 +3,7 @@ const express = require("express");
 const app = express();
 
 // ✅ KHÔNG hardcode
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 8080;
 
 // debug port
 console.log("🚀 Starting app...");
