@@ -1,10 +1,15 @@
-// server.js
 const express = require("express");
 const { chromium } = require("playwright");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ✅ Health check (QUAN TRỌNG)
+app.get("/", (req, res) => {
+  res.send("OK");
+});
+
+// parse level
 function parseLevels(text) {
   text = (text || "").toLowerCase();
   const found = new Set();
@@ -12,52 +17,48 @@ function parseLevels(text) {
   if (text.includes("principal")) found.add("Principal");
   if (text.includes("lead")) found.add("Lead");
   if (text.includes("senior")) found.add("Senior");
-  if (text.includes("mid") || text.includes("middle") || text.includes("experienced")) found.add("Mid");
-  if (text.includes("junior") || text.includes("jr") || text.includes("entry")) found.add("Junior");
+  if (text.includes("mid") || text.includes("middle")) found.add("Mid");
+  if (text.includes("junior") || text.includes("jr")) found.add("Junior");
   if (text.includes("intern")) found.add("Intern");
   if (text.includes("fresher")) found.add("Fresher");
 
   return Array.from(found);
 }
 
+// API crawl
 app.get("/jobs", async (req, res) => {
   const keyword = req.query.keyword || "frontend";
 
-  // timeouts configurable by env for flexibility in different environments
-  const NAV_TIMEOUT = parseInt(process.env.NAV_TIMEOUT, 10) || 30000; // ms
-  const SELECTOR_TIMEOUT = parseInt(process.env.SELECTOR_TIMEOUT, 10) || 10000; // ms
-
   let browser;
   let context;
+
+  // ⏱️ timeout guard (tránh Railway kill)
+  const timeout = setTimeout(() => {
+    console.log("Request timeout");
+    res.status(504).json({ error: "Timeout" });
+  }, 25000);
+
   try {
     console.log("Launching browser...");
-    // add no-sandbox and related flags for container environments
+
     browser = await chromium.launch({
       headless: true,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--single-process"
+        "--disable-dev-shm-usage"
       ]
     });
 
-    context = await browser.newContext({
-    userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
-  });
+    context = await browser.newContext();
+    const page = await context.newPage();
 
-  const page = await context.newPage();
     await page.goto(
       `https://itviec.com/viec-lam-it/${keyword}-developer/ho-chi-minh-hcm`,
-      {
-        waitUntil: "domcontentloaded",
-        timeout: NAV_TIMEOUT
-      }
+      { waitUntil: "domcontentloaded", timeout: 30000 }
     );
 
-    await page.waitForTimeout(1500);
-    await page.waitForSelector(".job-card", { timeout: SELECTOR_TIMEOUT });
+    await page.waitForSelector(".job-card", { timeout: 10000 });
 
     const jobs = await page.evaluate(() => {
       return Array.from(document.querySelectorAll(".job-card")).map(job => {
@@ -68,26 +69,18 @@ app.get("/jobs", async (req, res) => {
 
         return {
           title: titleEl?.innerText?.trim(),
-
-          // ✅ link job chuẩn
           link: rawLink
             ? rawLink.startsWith("http")
               ? rawLink
               : "https://itviec.com" + rawLink
             : null,
-
           company: companyEl?.innerText?.trim(),
-
-          // ✅ link company
           company_link: companyEl
             ? "https://itviec.com" + companyEl.getAttribute("href")
             : null,
-
           tags: Array.from(job.querySelectorAll(".itag")).map(t =>
             t.innerText.trim()
           ),
-
-          // ✅ "Đăng 4 giờ trước"
           time: job
             .querySelector(".small-text.text-dark-grey")
             ?.innerText?.trim()
@@ -95,97 +88,41 @@ app.get("/jobs", async (req, res) => {
       });
     });
 
-    // Try to fetch TopCV search results for the same keyword/location
-    let topcvJobs = [];
-    try {
-      const page2 = await context.newPage();
-      const topcvUrl = `https://www.topcv.vn/tim-viec-lam-${keyword}-developer-tai-ho-chi-minh-kl2`;
-      await page2.goto(topcvUrl, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT });
-      await page2.waitForTimeout(1500);
+    await browser.close();
 
-      // wait for at least one result, but don't throw if none
-      try {
-        await page2.waitForSelector('.job-item-search-result', { timeout: SELECTOR_TIMEOUT });
-      } catch (e) {
-        // no results found quickly — continue with empty topcvJobs
-      }
-
-      topcvJobs = await page2.evaluate(() => {
-        return Array.from(document.querySelectorAll('.job-item-search-result')).map(item => {
-          const titleEl = item.querySelector('h3.title a span') || item.querySelector('h3.title a');
-          const linkEl = item.querySelector('h3.title a');
-          const companyEl = item.querySelector('.company-name');
-          const companyLinkEl = item.querySelector('a.company');
-          const salaryEl = item.querySelector('.title-salary') || item.querySelector('.salary span');
-          const locationEl = item.querySelector('.city-text');
-          const timeEl = item.querySelector('.icon label') || item.querySelector('.label-update');
-
-          const tags = Array.from(item.querySelectorAll('.tag a.item-tag')).map(t => t.innerText.trim());
-
-          return {
-            title: titleEl?.innerText?.trim(),
-            link: linkEl?.href || null,
-            company: companyEl?.innerText?.trim(),
-            company_link: companyLinkEl?.href || null,
-            salary: salaryEl?.innerText?.trim(),
-            location: locationEl?.innerText?.trim(),
-            time: timeEl?.innerText?.trim(),
-            tags
-          };
-        });
-      });
-
-      await page2.close();
-    } catch (e) {
-      console.error('TopCV scrape failed:', e?.message || e);
-      // continue — we still return itviec results
-    }
-
-  // merge both sources
-  const combined = (jobs || []).concat(topcvJobs || []);
-
-    const filtered = combined.filter(job => {
+    const filtered = jobs.filter(job => {
       const text = (job.title || "") + " " + (job.tags || []).join(" ");
       const levels = parseLevels(text);
 
-      // keep if no level detected
       if (levels.length === 0) return true;
 
-      const lowerLevels = new Set(["Fresher", "Junior", "Mid", "Intern", "Middle"]);
-      const seniorLevels = new Set(["Senior", "Lead", "Principal"]);
-
-      const hasLower = levels.some(l => lowerLevels.has(l));
-      const hasSenior = levels.some(l => seniorLevels.has(l));
-
-      // keep if any lower-level is present (e.g., Junior/Mid, Fresher/Junior)
-      if (hasLower) return true;
-
-      // if there are only senior-type levels (Senior, Lead, Principal), exclude
-      if (hasSenior && !hasLower) return false;
-
-      // default: keep
-      return true;
+      const lower = ["Fresher", "Junior", "Mid", "Intern"];
+      return levels.some(l => lower.includes(l));
     });
 
-    // Return all filtered jobs (do not slice) as requested
+    clearTimeout(timeout);
+
     res.json({
       success: true,
+      count: filtered.length,
       data: filtered
     });
 
   } catch (err) {
-    console.error('/jobs error:', err?.message || err);
-    res.status(500).json({ error: err?.message || String(err), hint: 'Playwright may have failed to launch. Consider using the provided Dockerfile or ensure Playwright browsers are installed (postinstall).' });
+    console.error("ERROR:", err.message);
+
+    clearTimeout(timeout);
+
+    res.status(500).json({
+      error: err.message
+    });
   } finally {
-    try {
-      if (context) await context.close();
-    } catch (e) {}
-    try {
-      if (browser) await browser.close();
-    } catch (e) {}
+    if (context) await context.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
   }
 });
 
-app.listen(PORT, () => {
-  console.log("http://localhost:" + PORT);
+// ✅ bind đúng host cho container
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
 });
