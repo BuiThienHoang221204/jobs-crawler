@@ -66,10 +66,10 @@ app.get("/jobs", async (req, res) => {
 
     await page.goto(
       `https://itviec.com/viec-lam-it/${keyword}-developer/ho-chi-minh-hcm`,
-      { waitUntil: "domcontentloaded", timeout: 30000 }
+      { waitUntil: "domcontentloaded", timeout: 60000 }
     );
 
-    await page.waitForSelector(".job-card", { timeout: 10000 });
+    await page.waitForSelector(".job-card", { timeout: 60000 });
 
     const jobs = await page.evaluate(() => {
       return Array.from(document.querySelectorAll(".job-card")).map(job => {
