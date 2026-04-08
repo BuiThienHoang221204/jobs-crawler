@@ -133,7 +133,20 @@ app.get("/jobs", async (req, res) => {
   }
 });
 
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT_EXCEPTION:", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("UNHANDLED_REJECTION:", reason);
+});
+
 // ✅ bind đúng
-app.listen(PORT, "0.0.0.0", () => {
+const server = app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
+});
+
+server.on("error", (err) => {
+  console.error("LISTEN_ERROR:", err);
+  process.exit(1);
 });
