@@ -1,23 +1,27 @@
 const express = require("express");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-// log startup
+// ✅ KHÔNG hardcode
+const PORT = Number(process.env.PORT) || 3000;
+
+// debug port
 console.log("🚀 Starting app...");
+console.log("ENV PORT:", process.env.PORT);
+console.log("USING PORT:", PORT);
 
-// Basic logging
+// logging
 app.use((req, res, next) => {
   console.log(`> ${req.method} ${req.path}`);
   next();
 });
 
-// ✅ Health check
+// health check
 app.get("/", (req, res) => {
   res.send("OK");
 });
 
-app.get('/favicon.ico', (req, res) => res.status(204).end());
+app.get("/favicon.ico", (req, res) => res.status(204).end());
 
 // parse level
 function parseLevels(text) {
@@ -35,11 +39,11 @@ function parseLevels(text) {
   return Array.from(found);
 }
 
-// API crawl
+// API
 app.get("/jobs", async (req, res) => {
   const keyword = req.query.keyword || "frontend";
 
-  // ✅ mock mode để debug
+  // mock mode
   if (process.env.DISABLE_SCRAPE === "1") {
     return res.json({
       success: true,
@@ -48,24 +52,11 @@ app.get("/jobs", async (req, res) => {
     });
   }
 
-  // 🔥 lazy load Playwright (FIX QUAN TRỌNG)
+  // lazy load playwright
   const { chromium } = require("playwright");
 
   let browser;
   let context;
-
-  let timedOut = false;
-  const timeout = setTimeout(async () => {
-    timedOut = true;
-    console.log("⏱ Timeout");
-
-    try { if (context) await context.close(); } catch {}
-    try { if (browser) await browser.close(); } catch {}
-
-    if (!res.headersSent) {
-      res.status(504).json({ error: "Timeout" });
-    }
-  }, 25000);
 
   try {
     console.log("Launching browser...");
@@ -127,30 +118,22 @@ app.get("/jobs", async (req, res) => {
       return levels.some(l => lower.includes(l));
     });
 
-    clearTimeout(timeout);
-
-    if (!timedOut && !res.headersSent) {
-      res.json({
-        success: true,
-        count: filtered.length,
-        data: filtered
-      });
-    }
+    res.json({
+      success: true,
+      count: filtered.length,
+      data: filtered
+    });
 
   } catch (err) {
     console.error("ERROR:", err.message);
-    clearTimeout(timeout);
-
-    if (!res.headersSent) {
-      res.status(500).json({ error: err.message });
-    }
+    res.status(500).json({ error: err.message });
   } finally {
     if (context) await context.close().catch(() => {});
     if (browser) await browser.close().catch(() => {});
   }
 });
 
-// ✅ QUAN TRỌNG: bind đúng host
+// ✅ bind đúng
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ Server running on port ${PORT}`);
 });
