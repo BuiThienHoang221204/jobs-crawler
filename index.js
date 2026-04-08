@@ -38,6 +38,18 @@ function parseLevels(text) {
 app.get("/jobs", async (req, res) => {
   const keyword = req.query.keyword || "frontend";
 
+  // Quick fail-safe: if DISABLE_SCRAPE is set, return a small mock response so
+  // we can verify the service / port connectivity without running Playwright.
+  if (process.env.DISABLE_SCRAPE === "1") {
+    return res.json({
+      success: true,
+      mock: true,
+      data: [
+        { title: "Mock Job - Frontend", company: "ACME", source: "mock" }
+      ]
+    });
+  }
+
   let browser;
   let context;
 
