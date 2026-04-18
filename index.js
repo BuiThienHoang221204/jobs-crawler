@@ -23,20 +23,27 @@ function parseLevels(text) {
 app.get("/jobs", async (req, res) => {
   const keyword = req.query.keyword || "frontend";
 
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
-    userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
-  });
-
-  const page = await context.newPage();
-  
+  let browser;
   try {
+    console.log("Launching browser...");
+    browser = await chromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
+    });
+    console.log("Browser launched successfully");
+
+    const context = await browser.newContext({
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+    });
+
+    const page = await context.newPage();
+
     await page.goto(
       `https://itviec.com/viec-lam-it/${keyword}-developer/ho-chi-minh-hcm`,
       {
         waitUntil: "domcontentloaded",
-        timeout: 60000
+        timeout: 30000  // reduced from 60000 to avoid Railway timeout
       }
     );
 
@@ -83,8 +90,8 @@ app.get("/jobs", async (req, res) => {
     let topcvJobs = [];
     try {
       const page2 = await context.newPage();
-      const topcvUrl = `https://www.topcv.vn/tim-viec-lam-${keyword}-developer-tai-ho-chi-minh-kl2`;
-      await page2.goto(topcvUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+      const topcvUrl = `https://www.topcv.vn/tim-viec-lam-${keyword}-developer-tai-ho-chi-minh-kl2?type_keyword=1&sba=1&locations=l2`;
+      await page2.goto(topcvUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
       await page2.waitForTimeout(2000);
 
       // wait for at least one result, but don't throw if none
@@ -102,7 +109,7 @@ app.get("/jobs", async (req, res) => {
           const companyLinkEl = item.querySelector('a.company');
           const salaryEl = item.querySelector('.title-salary') || item.querySelector('.salary span');
           const locationEl = item.querySelector('.city-text');
-          const timeEl = item.querySelector('.icon label') || item.querySelector('.label-update');
+          const timeEl = item.querySelector('.label-update') || item.querySelector('.icon label');
 
           const tags = Array.from(item.querySelectorAll('.tag a.item-tag')).map(t => t.innerText.trim());
 
@@ -124,8 +131,6 @@ app.get("/jobs", async (req, res) => {
       console.error('TopCV scrape failed:', e.message);
       // continue — we still return itviec results
     }
-
-    await browser.close();
 
     // merge both sources
     const combined = (jobs || []).concat(topcvJobs || []);
@@ -160,8 +165,17 @@ app.get("/jobs", async (req, res) => {
     });
 
   } catch (err) {
-    await browser.close();
+    console.error("Error in /jobs:", err.message);
     res.status(500).json({ error: err.message });
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+        console.log("Browser closed");
+      } catch (closeErr) {
+        console.error("Error closing browser:", closeErr.message);
+      }
+    }
   }
 });
 
