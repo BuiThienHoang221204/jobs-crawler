@@ -132,8 +132,61 @@ app.get("/jobs", async (req, res) => {
       // continue — we still return itviec results
     }
 
-    // merge both sources
-    const combined = (jobs || []).concat(topcvJobs || []);
+    // Try to fetch Indeed search results for the same keyword/location
+    let indeedJobs = [];
+    try {
+      const page3 = await context.newPage();
+      const indeedUrl = `https://vn.indeed.com/jobs?q=${encodeURIComponent(keyword)}+developer&l=Th%C3%A0nh+ph%E1%BB%91+H%E1%BB%93+Ch%C3%AD+Minh&vjk=ee4c47a604961367`;
+      await page3.goto(indeedUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page3.waitForTimeout(5000);  // increased wait for dynamic loading
+
+      // Scroll to bottom to trigger loading more jobs
+      await page3.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page3.waitForTimeout(2000);
+
+      // wait for at least one result, but don't throw if none
+      try {
+        await page3.waitForSelector('.job_seen_beacon', { timeout: 15000 });
+      } catch (e) {
+        // no results found quickly — continue with empty indeedJobs
+      }
+
+      indeedJobs = await page3.evaluate(() => {
+        const items = document.querySelectorAll('.job_seen_beacon');
+        console.log('Indeed: Found', items.length, 'job_seen_beacon elements');
+        return Array.from(items).map(item => {
+          const titleEl = item.querySelector('h2.jobTitle a span[id^="jobTitle-"]');
+          const linkEl = item.querySelector('h2.jobTitle a');
+          const companyEl = item.querySelector('span[data-testid="company-name"]');
+          const locationEl = item.querySelector('div[data-testid="text-location"]');
+
+          // Indeed may not have salary/time/tags in list view, so leave empty or null
+          return {
+            title: titleEl?.innerText?.trim(),
+            link: linkEl?.href ? 'https://vn.indeed.com' + linkEl.href : null,
+            company: companyEl?.innerText?.trim(),
+            company_link: null, // Indeed doesn't have company link in list
+            salary: null,
+            location: locationEl?.innerText?.trim(),
+            time: null,
+            tags: [] // Indeed doesn't have tags in list view
+          };
+        });
+      });
+
+      console.log('indeedJobs length:', indeedJobs.length);
+      if (indeedJobs.length > 0) {
+        console.log('Sample indeed job:', indeedJobs[0]);
+      }
+
+      await page3.close();
+    } catch (e) {
+      console.error('Indeed scrape failed:', e.message);
+      // continue — we still return other results
+    }
+
+    // merge all sources
+    const combined = (jobs || []).concat(topcvJobs || []).concat(indeedJobs || []);
 
     const filtered = combined.filter(job => {
       const text = (job.title || "") + " " + (job.tags || []).join(" ");
@@ -158,6 +211,8 @@ app.get("/jobs", async (req, res) => {
       return true;
     });
 
+    console.log('filtered', filtered);
+    
     // Return all filtered jobs (do not slice) as requested
     res.json({
       success: true,
